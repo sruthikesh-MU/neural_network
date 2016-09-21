@@ -125,7 +125,7 @@ while epochIter<epoch && ValErr>errThrsd
         
     end
     % Batch training
-    if strcmp(solver, 'vanillaGD')
+    if strcmp(solver, 'vanillaGD') || strcmp(solver, 'vanillaGDRand')
         for k = 1:length(noOfNeuronsPerLayer) % Accumulate delta over all training samples
             deltaW{k} = deltaW{k}./nData;
         end
