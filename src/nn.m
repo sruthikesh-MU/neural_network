@@ -1,5 +1,5 @@
-function [output_args] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize)
-% Implementation of a simple neural network with back propagation 
+function accuracy = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize)
+% Implementation of a simple neural network with back propagation
 
 % Divide input data into train, validation and test set
 [trainInd,valInd,testInd] = dividerand(size(X, 1), trainRatio, (1-trainRatio-testRatio), testRatio);    % Indices for input data split
@@ -28,13 +28,13 @@ W = init_weights(nDim, noOfNeuronsPerLayer, 0);
 % One hot representation of labels
 oneHotTrainY = oneHotEncoding(trainY);
 oneHotValY = oneHotEncoding(valY);
-oneHotTestY = oneHotEncoding(testY);
 
 % Train the network on training set and check the error on validation set
 % to update the hyper parameters
-W = train(trainX, valX, oneHotTrainY, oneHotValY, noOfNeuronsPerLayer, W, epoch, errThrsd, maxIter, eta, actFnType, batchSize);
+W = train(trainX, valX, oneHotTrainY, oneHotValY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize);
 
 % Deploy the model on the test set to check the accuracy
+[labels, accuracy] = test(testX, testY, noOfNeuronsPerLayer, W, actFnType);
 
 end
 
@@ -61,61 +61,74 @@ nSamples = length(labels);  % Number of data samples
 
 oneHotLabels = zeros(nSamples, nLabels);
 for i = 1:nLabels
-	oneHotLabels(:,i) = (labels == valueLabels(i));
+    oneHotLabels(:,i) = (labels == valueLabels(i));
 end
 end
 
 % Train the neural network
-function W = train(trainX, valX, trainY, valY, noOfNeuronsPerLayer, W, epoch, errThrsd, maxIter, eta, actFnType, batchSize)
+function W = train(trainX, valX, trainY, valY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize)
 
-iter = 0;
 [nData, nDim] = size(trainX);
 
-% Preallocate cell array for 
-X = cell(length(noOfNeuronsPerLayer)+1, 1);
-X{length(noOfNeuronsPerLayer)+1, 1} = [];
+% Preallocate cell array
+deltaBatch = cell(length(noOfNeuronsPerLayer)+1, 1);
+deltaBatch{length(noOfNeuronsPerLayer)+1, 1} = [];
 deltaW = cell(length(noOfNeuronsPerLayer)+1, 1);
 deltaW{length(noOfNeuronsPerLayer)+1, 1} = [];
 
 % Dropout scheme. If implmented correct the weights to normalize correctly.
+epochIter = 0;
+ValErr = inf;
 
-% Online training/ batch training
-for i = 1:batchSize:nData
-    if(batchSize==1)    % Online training
-        randIndices = i;
-    else    % Batch training
-        randIndices = randi(nData, batchSize, 1); % Generate random indices
-    end
-    
-    % Sample input training data and labels for forward pass
-    X{1} = trainX(randIndices,:);
-    y = trainY(randIndices);
-    
-    epoch_iter = 0; % Reset epoch for every sample of data
-    while epoch_iter<epoch
-        % Forward pass
-        for k = 1:length(noOfNeuronsPerLayer)
-            % appending 1's to input for bias
-            X{k+1}=forward(actFnType, horzcat(X{k}, ones(size(X{k}, 1), 1)), W{k});  % Activations from current layer will be inputs to next layer
+% Max no. iterations before terminating the training
+while epochIter<epoch && ValErr>errThrsd
+    for i = 1:batchSize:nData   % Online training/ batch training
+        if(batchSize==1)    % Online training
+            randIndices = i;
+        else    % Batch training
+            randIndices = randi(nData, batchSize, 1); % Generate random indices
         end
+        
+        % Sample labels for forward pass
+        y = trainY(randIndices,:);
+        
+        % Forward pass
+        X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices,:), W);  % Feed forward phase of network
+        
         % Compute the error
-        err = computeErr(X{length(noOfNeuronsPerLayer)+1}, y(i,:));
+        err = computeErr(X{end}, y);
         % Backward pass
-        deltaW = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
-        % TODO: Compute the error on validation set and decide which
-        % parameters are optimal and check for overfitting
+        if batchSize==1 || i==1 % Online training or first batch of training data
+            deltaW = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
+        else % accumulate all delta
+            deltaBatch = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
+            for k = 1:length(noOfNeuronsPerLayer) % Accumulate delta over all training samples
+                deltaW{k} = deltaW{k} + deltaBatch{k};
+            end
+        end
         
         % update weights, Overfitting: learning rate momentum, weight decay??
         % TODO: momentum for learning rate
-        W = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta);
+        if batchSize==1
+            W = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta); % Online training
+        end
         
-        epoch_iter = epoch_iter+1;
-        iter = iter+1;
     end
-    % Exit the loop once the number of training iterations reaches maximum
-    if iter>=maxIter
-        break;  
+    % Batch training
+    if batchSize~=1
+        for k = 1:length(noOfNeuronsPerLayer) % Accumulate delta over all training samples
+            deltaW{k} = deltaW{k}./nData;
+        end
+        W = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta); % Batch training
     end
+    
+    % Compute the error on validation set and decide which
+    % parameters are optimal and check for overfitting and termination
+    X=forward(noOfNeuronsPerLayer, actFnType, valX, W);  % Feed forward phase of network
+    % Compute the error
+    ValErr = sum(sum(abs(computeErr(X{end}, valY))));
+    disp(['Iteration: ', num2str(epochIter), ' Validation error: ', ValErr]);
+    epochIter = epochIter+1;
 end
 
 end
@@ -124,9 +137,9 @@ end
 function [labels, accuracy] = test(X, y, noOfNeuronsPerLayer, W, actFnType)
 
 % Deploy a forward pass and classify the data
-actOut = forward(actFnType, X, W);
-% Max probability for data classification 
-[result, labels] = max(actOut, [], 2);
+actOut = forward(noOfNeuronsPerLayer, actFnType, X, W);
+% Max probability for data classification
+[result, labels] = max(actOut{end}, [], 2);
 % Compute the error of classification
 cp = classperf(y, labels);
 accuracy = cp.CorrectRate;
@@ -134,19 +147,33 @@ end
 
 % Weight update function
 function out = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta)
+
+out = cell(length(noOfNeuronsPerLayer), 1);
+out{length(noOfNeuronsPerLayer), 1} = [];
+
 for i=1:length(noOfNeuronsPerLayer)
     out{i} = W{i} - eta.*deltaW{i};
 end
 end
 
 % Forward pass for the activation function
-function out = forward(actFnType, X, W)
+function out = forward(noOfNeuronsPerLayer, actFnType, X, W)
 
-% Local induced field
-v = X*W';
+a = cell(length(noOfNeuronsPerLayer)+1, 1);
+a{length(noOfNeuronsPerLayer)+1, 1} = [];
 
-% activation functions
-out = actFn(actFnType, v);
+% First layer activations are inputs to the network
+a{1} = X;
+
+for i=1:length(noOfNeuronsPerLayer)
+    % Local induced field
+    v = horzcat(a{i}, ones(size(a{i}, 1), 1))*W{i}';
+    
+    % activation functions
+    a{i+1} = actFn(actFnType, v);
+end
+
+out = a;    % Output all the activation of inputs for backpropagation
 end
 
 % Activation function
@@ -173,7 +200,7 @@ function out = backward(actFnType, noOfNeuronsPerLayer, err, a, W)
 
 delta = err.*actFnDer(actFnType, a{end}); %Last layer local gradient
 for i=length(noOfNeuronsPerLayer):-1:1
-    out{i} = (horzcat(a{i}, ones(size(a{i}, 1), 1))'*delta)'./(size(a{i}, 1));
+    out{i} = (horzcat(a{i}, ones(size(a{i}, 1), 1))'*delta)';
     if i>1 % Local gradient not required for first layer
         delta = actFnDer(actFnType, a{i}) .* (delta*W{i}(:,1:end-1));    % Local gradient for prev layer
     end
@@ -198,7 +225,7 @@ switch actFnType
 end
 end
 
-% Compute error 
+% Compute error
 function out = computeErr(y, trueY)
 % Compute the error
 out = -(trueY - y); % Derivative of error wrt current neuron y
