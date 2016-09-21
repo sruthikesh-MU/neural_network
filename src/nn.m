@@ -1,4 +1,4 @@
-function accuracy = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize)
+function accuracy = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize, solver)
 % Implementation of a simple neural network with back propagation
 
 % Divide input data into train, validation and test set
@@ -31,7 +31,7 @@ oneHotValY = oneHotEncoding(valY);
 
 % Train the network on training set and check the error on validation set
 % to update the hyper parameters
-W = train(trainX, valX, oneHotTrainY, oneHotValY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize);
+W = train(trainX, valX, oneHotTrainY, oneHotValY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize, solver);
 
 % Deploy the model on the test set to check the accuracy
 [labels, accuracy] = test(testX, testY, noOfNeuronsPerLayer, W, actFnType);
@@ -66,7 +66,7 @@ end
 end
 
 % Train the neural network
-function W = train(trainX, valX, trainY, valY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize)
+function W = train(trainX, valX, trainY, valY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize, solver)
 
 [nData, nDim] = size(trainX);
 
@@ -79,26 +79,37 @@ deltaW{length(noOfNeuronsPerLayer)+1, 1} = [];
 % Dropout scheme. If implmented correct the weights to normalize correctly.
 epochIter = 0;
 ValErr = inf;
+randIndices = 1:nData;
 
 % Max no. iterations before terminating the training
 while epochIter<epoch && ValErr>errThrsd
+    
+    % Shuffle the indices every iteration to have a differnet update
+    randIndices = (randperm(nData))';
+    
     for i = 1:batchSize:nData   % Online training/ batch training
-        if(batchSize==1)    % Online training
-            randIndices = i;
-        else    % Batch training
-            randIndices = randi(nData, batchSize, 1); % Generate random indices
+        
+        % Generate batch indices completely random; Somehow this gives a
+        % good accuracy because this way input is covered randomly
+        if strcmp(solver, 'vanillaGDRand')
+            randIndices((i-1)*batchSize+1:i*batchSize) = randi(nData, batchSize, 1); % Generate random indices
         end
         
         % Sample labels for forward pass
-        y = trainY(randIndices,:);
-        
-        % Forward pass
-        X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices,:), W);  % Feed forward phase of network
+        if (i+1)*batchSize > nData
+            y = trainY(randIndices((i-1)*batchSize+1:nData),:);
+            % Forward pass
+            X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices((i-1)*batchSize+1:nData),:), W);  % Feed forward phase of network
+        else
+            y = trainY(randIndices((i-1)*batchSize+1:i*batchSize),:);
+            % Forward pass
+            X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices((i-1)*batchSize+1:i*batchSize),:), W);  % Feed forward phase of network
+        end
         
         % Compute the error
         err = computeErr(X{end}, y);
         % Backward pass
-        if batchSize==1 || i==1 % Online training or first batch of training data
+        if strcmp(solver, 'SGD') || i==1 % Online training or first batch of training data
             deltaW = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
         else % accumulate all delta
             deltaBatch = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
@@ -106,16 +117,15 @@ while epochIter<epoch && ValErr>errThrsd
                 deltaW{k} = deltaW{k} + deltaBatch{k};
             end
         end
-        
         % update weights, Overfitting: learning rate momentum, weight decay??
         % TODO: momentum for learning rate
-        if batchSize==1
-            W = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta); % Online training
+        if strcmp(solver, 'SGD')
+            W = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta); % Stochastic gradient online training
         end
         
     end
     % Batch training
-    if batchSize~=1
+    if strcmp(solver, 'vanillaGD')
         for k = 1:length(noOfNeuronsPerLayer) % Accumulate delta over all training samples
             deltaW{k} = deltaW{k}./nData;
         end
@@ -127,7 +137,9 @@ while epochIter<epoch && ValErr>errThrsd
     X=forward(noOfNeuronsPerLayer, actFnType, valX, W);  % Feed forward phase of network
     % Compute the error
     ValErr = sum(sum(abs(computeErr(X{end}, valY))));
-    disp(['Iteration: ', num2str(epochIter), ' Validation error: ', ValErr]);
+    if mod(epochIter, 1000)==0
+        disp(['Iteration: ', num2str(epochIter), ' Validation error: ', num2str(ValErr)]);
+    end
     epochIter = epochIter+1;
 end
 
@@ -151,6 +163,11 @@ function out = updateWeights(noOfNeuronsPerLayer, W, deltaW, eta)
 out = cell(length(noOfNeuronsPerLayer), 1);
 out{length(noOfNeuronsPerLayer), 1} = [];
 
+% TODO: Other solver optimizations 
+% Momentum, Nesterov, Adagrad, Adadelta, Adam
+
+% Vanilla/ Batch Gradient descent
+% SGD - Online training for each sample
 for i=1:length(noOfNeuronsPerLayer)
     out{i} = W{i} - eta.*deltaW{i};
 end
@@ -200,7 +217,7 @@ function out = backward(actFnType, noOfNeuronsPerLayer, err, a, W)
 
 delta = err.*actFnDer(actFnType, a{end}); %Last layer local gradient
 for i=length(noOfNeuronsPerLayer):-1:1
-    out{i} = (horzcat(a{i}, ones(size(a{i}, 1), 1))'*delta)';
+    out{i} = (horzcat(a{i}, ones(size(a{i}, 1), 1))'*delta)'; % Sum of all the delta for the batch of inputs
     if i>1 % Local gradient not required for first layer
         delta = actFnDer(actFnType, a{i}) .* (delta*W{i}(:,1:end-1));    % Local gradient for prev layer
     end
