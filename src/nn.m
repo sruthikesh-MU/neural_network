@@ -1,4 +1,4 @@
-function accuracy = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize, solver)
+function [accuracy, valErr] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize, solver)
 % Implementation of a simple neural network with back propagation
 
 % Divide input data into train, validation and test set
@@ -31,7 +31,7 @@ oneHotValY = oneHotEncoding(valY);
 
 % Train the network on training set and check the error on validation set
 % to update the hyper parameters
-W = train(trainX, valX, oneHotTrainY, oneHotValY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize, solver);
+[W, valErr] = train(trainX, valX, oneHotTrainY, oneHotValY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize, solver);
 
 % Deploy the model on the test set to check the accuracy
 [labels, accuracy] = test(testX, testY, noOfNeuronsPerLayer, W, actFnType);
@@ -66,9 +66,10 @@ end
 end
 
 % Train the neural network
-function W = train(trainX, valX, trainY, valY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize, solver)
+function [W, valErr] = train(trainX, valX, trainY, valY, noOfNeuronsPerLayer, W, epoch, errThrsd, eta, actFnType, batchSize, solver)
 
 [nData, nDim] = size(trainX);
+etaOrig = eta;
 
 % Preallocate cell array
 deltaBatch = cell(length(noOfNeuronsPerLayer)+1, 1);
@@ -78,38 +79,44 @@ deltaW{length(noOfNeuronsPerLayer)+1, 1} = [];
 
 % Dropout scheme. If implmented correct the weights to normalize correctly.
 epochIter = 0;
-ValErr = inf;
+valErr = inf;
 randIndices = 1:nData;
 
 % Max no. iterations before terminating the training
-while epochIter<epoch && ValErr>errThrsd
+while epochIter<epoch && valErr>errThrsd
     
     % Shuffle the indices every iteration to have a differnet update
     randIndices = (randperm(nData))';
     
     for i = 1:batchSize:nData   % Online training/ batch training
         
+        curBatch = i/batchSize + 1;
+        
         % Generate batch indices completely random; Somehow this gives a
         % good accuracy because this way input is covered randomly
         if strcmp(solver, 'vanillaGDRand')
-            randIndices((i-1)*batchSize+1:i*batchSize) = randi(nData, batchSize, 1); % Generate random indices
+            if curBatch*batchSize > nData
+                randIndices((curBatch-1)*batchSize+1:nData) = randi(nData, rem(nData, batchSize), 1); % Generate random indices
+            else
+                randIndices((curBatch-1)*batchSize+1:curBatch*batchSize) = randi(nData, batchSize, 1); % Generate random indices
+            end
         end
         
         % Sample labels for forward pass
-        if (i+1)*batchSize > nData
-            y = trainY(randIndices((i-1)*batchSize+1:nData),:);
+        if curBatch*batchSize > nData
+            y = trainY(randIndices((curBatch-1)*batchSize+1:nData),:);
             % Forward pass
-            X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices((i-1)*batchSize+1:nData),:), W);  % Feed forward phase of network
+            X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices((curBatch-1)*batchSize+1:nData),:), W);  % Feed forward phase of network
         else
-            y = trainY(randIndices((i-1)*batchSize+1:i*batchSize),:);
+            y = trainY(randIndices((curBatch-1)*batchSize+1:curBatch*batchSize),:);
             % Forward pass
-            X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices((i-1)*batchSize+1:i*batchSize),:), W);  % Feed forward phase of network
+            X=forward(noOfNeuronsPerLayer, actFnType, trainX(randIndices((curBatch-1)*batchSize+1:curBatch*batchSize),:), W);  % Feed forward phase of network
         end
         
         % Compute the error
         err = computeErr(X{end}, y);
         % Backward pass
-        if strcmp(solver, 'SGD') || i==1 % Online training or first batch of training data
+        if strcmp(solver, 'SGD') || curBatch==1 % Online training or first batch of training datai
             deltaW = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
         else % accumulate all delta
             deltaBatch = backward(actFnType, noOfNeuronsPerLayer, err, X, W);
@@ -136,10 +143,18 @@ while epochIter<epoch && ValErr>errThrsd
     % parameters are optimal and check for overfitting and termination
     X=forward(noOfNeuronsPerLayer, actFnType, valX, W);  % Feed forward phase of network
     % Compute the error
-    ValErr = sum(sum(abs(computeErr(X{end}, valY))));
+    valErr = sum(sum(abs(computeErr(X{end}, valY))));
     if mod(epochIter, 1000)==0
-        disp(['Iteration: ', num2str(epochIter), ' Validation error: ', num2str(ValErr)]);
+        disp(['Iteration: ', num2str(epochIter), ' Validation error: ', num2str(valErr)]);
     end
+    
+    % Annealing learning rate
+    % Multiple ways to do this; using the gradient difference or using
+    % iteration number; 
+    % For simplicity we use iteration count
+    k = 1e-4;
+    eta = etaOrig*exp(-k*epochIter);    % exponential decay: CS231n
+    
     epochIter = epochIter+1;
 end
 
@@ -199,6 +214,8 @@ function out = actFn(actFnType, in)
 thrsd = 0; % Naive activation function
 
 switch actFnType
+    case 'linear'   % Identity activation
+        out = in;   
     case 'sigmoid'  % Sigmoid activation
         out = 1./(1 + exp(-in));
     case 'tanh' % tanH activation
@@ -206,9 +223,9 @@ switch actFnType
     case 'relu' % RELU activation, highly sparse
         out = max(0, in);
     case 'softmax'
-        out = exp(v)/sum(exp(v));   % probabilities
+        out = exp(in)/sum(exp(in));   % probabilities
     otherwise
-        out = v>thrsd;  % Heaveside step function
+        out = in>thrsd;  % Heaveside step function
 end
 end
 
@@ -229,12 +246,14 @@ function out = actFnDer(actFnType, v)
 
 % Derivative of activation function
 switch actFnType
+    case 'linear'   % Identity activation
+        out = 1;
     case 'sigmoid'  % Sigmoid activation
         out = v.*(1-v);   % Derivative
     case 'tanh' % tanH activation
         out = 1 - v.^2;
     case 'relu' % RELU activation, highly sparse
-        out = v>=0;
+        out = v>0;
     case 'softmax' % Softmax activation function
         out = repmat(v.*(1-v), length(v), 2)*eye(length(v)) + (v*v')*(ones(length(v))-eye(length(v)));   % TODO: Not sure if this is correct
     otherwise

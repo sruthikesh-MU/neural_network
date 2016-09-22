@@ -14,28 +14,45 @@ X = tmp(:,2:end);
 disp(['Variance of input data for each dimension is :: ',num2str(var(X))]);
 
 % Input parameters
-noOfNeuronsPerLayer = [2, 4, 8, 16, 32, length(unique(y))] ;
+% noOfNeuronsPerLayer = [2, 4, 8, 16, 32, length(unique(y))];
+noOfNeuronsPerLayer = [size(X, 2), length(unique(y))];
 trainRatio = 0.8;
 testRatio = 0.1;
 epoch = 100000;
-errThrsd = 0.01;
+errThrsd = 0.1;
 maxIter = 10000;
-eta = 0.001;
+eta = [0.1, 0.01, 0.005, 0.001];
 % sigmoid, tanh, relu activation functions
 % softmax function for last layer; TODO: Not sure if this works
-actFnType = 'tanh';
+actFnType = {'linear', 'sigmoid', 'tanh', 'relu'};
 batchSize = max(1, int16(size(y,1)/10));
 % vanillaGD - gradient descent with weight update only after all the training set is feed forward
 % vanillaGDRand - same as gradient descent but indices of every batch are randomly generated
 % SGD - stochastic gradient descent allows online mini-batch training
-solver = 'SGD';
+solver = {'vanillaGD', 'vanillaGDRand', 'SGD'};
 
 % TODO
 % Additional features
 % Momentum on weights and learning rate; activation function; 
 % network structure;
+% K-fold validation
+
+accuracy = zeros(length(actFnType)*length(solver));
+valErr = zeros(length(actFnType)*length(solver), epoch);
+
+[accuracy(1), valErr(1,:)] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta(2), actFnType{3}, batchSize, solver{1});
 
 % nn function
-accuracy = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta, actFnType, batchSize, solver)
+for i=1:length(actFnType)   % Loop for all the activation functions
+    for j=1:length(solver) % Loop for all the solvers
+        for k=1:length(eta) % Loop for all the learning rates
+            disp(['activation : ', actFnType(i),' and solver: ',solver(j), 'learning rate : ', num2str(eta(k))]);
+            [accuracy(i*j*k), valErr(i*j*k,:)] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta(k), actFnType{i}, batchSize, solver{j});
+            disp(['Accuracy is : ', num2str(accuracy(i*j*k))]);
+        end
+    end
+end
+
+disp('Stop here and get all the results');
 
 end
