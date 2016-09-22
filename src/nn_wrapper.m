@@ -40,8 +40,6 @@ solver = {'vanillaGD', 'vanillaGDRand', 'SGD'};
 accuracy = zeros(length(actFnType)*length(solver));
 valErr = zeros(length(actFnType)*length(solver), epoch);
 
-[accuracy(1), valErr(1,:)] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta(2), actFnType{3}, batchSize, solver{1});
-
 % nn function
 for i=1:length(actFnType)   % Loop for all the activation functions
     for j=1:length(solver) % Loop for all the solvers

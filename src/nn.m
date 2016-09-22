@@ -74,16 +74,16 @@ etaOrig = eta;
 % Preallocate cell array
 deltaBatch = cell(length(noOfNeuronsPerLayer)+1, 1);
 deltaBatch{length(noOfNeuronsPerLayer)+1, 1} = [];
-deltaW = cell(length(noOfNeuronsPerLayer)+1, 1);
+deltaW = cell(length(noOfNeuronsPerLayer)+1, 1);100000
 deltaW{length(noOfNeuronsPerLayer)+1, 1} = [];
 
 % Dropout scheme. If implmented correct the weights to normalize correctly.
-epochIter = 0;
-valErr = inf;
+epochIter = 1;
+valErr = inf(1, epoch);
 randIndices = 1:nData;
 
 % Max no. iterations before terminating the training
-while epochIter<epoch && valErr>errThrsd
+while epochIter<epoch && valErr(epochIter)>errThrsd
     
     % Shuffle the indices every iteration to have a differnet update
     randIndices = (randperm(nData))';
@@ -143,16 +143,16 @@ while epochIter<epoch && valErr>errThrsd
     % parameters are optimal and check for overfitting and termination
     X=forward(noOfNeuronsPerLayer, actFnType, valX, W);  % Feed forward phase of network
     % Compute the error
-    valErr = sum(sum(abs(computeErr(X{end}, valY))));
-    if mod(epochIter, 1000)==0
-        disp(['Iteration: ', num2str(epochIter), ' Validation error: ', num2str(valErr)]);
+    valErr(epochIter) = sum(sum(abs(computeErr(X{end}, valY))));
+    if mod(epochIter, 1000)==1
+        disp(['Iteration: ', num2str(epochIter), ' Validation error: ', num2str(valErr(epochIter))]);
     end
     
     % Annealing learning rate
     % Multiple ways to do this; using the gradient difference or using
     % iteration number; 
     % For simplicity we use iteration count
-    k = 1e-4;
+    k = 2*1e-4;
     eta = etaOrig*exp(-k*epochIter);    % exponential decay: CS231n
     
     epochIter = epochIter+1;
