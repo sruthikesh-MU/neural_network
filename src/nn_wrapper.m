@@ -18,7 +18,7 @@ disp(['Variance of input data for each dimension is :: ',num2str(var(X))]);
 noOfNeuronsPerLayer = [size(X, 2), length(unique(y))];
 trainRatio = 0.8;
 testRatio = 0.1;
-epoch = 100000;
+epoch = 10;
 errThrsd = 0.1;
 maxIter = 10000;
 eta = [0.1, 0.01, 0.005, 0.001];
@@ -45,12 +45,13 @@ for i=1:length(actFnType)   % Loop for all the activation functions
     for j=1:length(solver) % Loop for all the solvers
         for k=1:length(eta) % Loop for all the learning rates
             disp(['activation : ', actFnType(i),' and solver: ',solver(j), 'learning rate : ', num2str(eta(k))]);
-            [accuracy(i*j*k), valErr(i*j*k,:)] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta(k), actFnType{i}, batchSize, solver{j});
-            disp(['Accuracy is : ', num2str(accuracy(i*j*k))]);
+            [accuracy((i-1)*length(solver)*length(eta)+(j-1)*length(eta)+k), valErr((i-1)*length(solver)*length(eta)+(j-1)*length(eta)+k,:)] = nn(X, y, noOfNeuronsPerLayer, trainRatio, testRatio, epoch, errThrsd, maxIter, eta(k), actFnType{i}, batchSize, solver{j});
+            disp(['Accuracy is : ', num2str(accuracy((i-1)*length(solver)*length(eta)+(j-1)*length(eta)+k))]);
         end
     end
 end
 
-disp('Stop here and get all the results');
+save(['accuracy_.mat'], 'accuracy');
+save('valErr_.mat', 'valErr');
 
 end
